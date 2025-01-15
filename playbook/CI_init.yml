@@ -1,0 +1,297 @@
+- name: Manage repository SSH keys
+  hosts: "{{ dest }}"
+  tasks:
+    - name: Vérifier l'existence du répertoire {{ key_path }}
+      ansible.builtin.stat:
+        path: "{{ key_path }}"
+      register: ssh_dir_status
+
+    - name: Créer le répertoire {{ key_path }} s'il n'existe pas
+      ansible.builtin.file:
+        path: "{{ key_path }}"
+        state: directory
+        mode: '0700'
+      when: not ssh_dir_status.stat.exists
+
+    - name: Vérifier l'existence du répertoire pour le dépôt spécifique
+      ansible.builtin.stat:
+        path: "{{ key_path }}/{{ repo_name }}"
+      register: repo_dir_status
+
+    - name: Créer le répertoire pour le dépôt spécifique s'il n'existe pas
+      ansible.builtin.file:
+        path: "{{ key_path }}/{{ repo_name }}"
+        state: directory
+        mode: '0700'
+      when: not repo_dir_status.stat.exists
+
+    - name: Vérifier l'existence du répertoire de travail défini dans [devserv:vars]
+      ansible.builtin.stat:
+        path: "{{ workspace }}"
+      register: workspace_dir_status
+
+    - name: Créer le répertoire de travail s'il n'existe pas
+      ansible.builtin.file:
+        path: "{{ workspace }}"
+        state: directory
+        mode: '0755'
+      when: not workspace_dir_status.stat.exists
+
+    - name: Vérifier l'existence des clés SSH dans le répertoire du dépôt
+      ansible.builtin.stat:
+        path: "{{ key_path }}/{{ repo_name }}/id_rsa"
+      register: ssh_key_status
+
+    - name: Générer une clé SSH sécurisée si elle n'existe pas
+      ansible.builtin.openssh_keypair:
+        path: "{{ key_path }}/{{ repo_name }}/id_rsa"
+        type: rsa
+        size: 4096
+      when: not ssh_key_status.stat.exists
+
+    - name: Configurer les permissions pour la clé privée
+      ansible.builtin.file:
+        path: "{{ key_path }}/{{ repo_name }}/id_rsa"
+        mode: '0600'
+      when: ssh_key_status.stat.exists
+    
+    - name: Lire le contenu de la clé privée
+      ansible.builtin.shell:
+        cmd: "cat {{ key_path }}/{{ repo_name }}/id_rsa"
+      register: private_key_content
+
+    - name: Lire le contenu de la clé publique
+      ansible.builtin.shell:
+        cmd: "cat {{ key_path }}/{{ repo_name }}/id_rsa.pub"
+      register: public_key_content
+
+    - name: Nettoyer le contenu de la clé publique pour éviter les espaces inutiles
+      ansible.builtin.set_fact:
+        public_key_cleaned: "{{ public_key_content.stdout.strip() }}"
+
+    - name: Vérifier si la clé publique est déjà dans authorized_keys
+      ansible.builtin.command:
+        cmd: "grep -Fxq '{{ public_key_cleaned }}' ~/.ssh/authorized_keys"
+      register: key_check
+      failed_when: key_check.rc not in [0, 1]
+
+    - name: Ajouter la clé publique au fichier authorized_keys si elle n'est pas déjà présente
+      ansible.builtin.authorized_key:
+        user: "{{ ansible_user }}"
+        key: "{{ public_key_cleaned }}"
+        state: present
+      when: key_check.rc == 1
+
+    - name: Vérifier si la configuration SSH pour le dépôt existe déjà
+      ansible.builtin.shell:
+        cmd: "grep -Fxq 'Host {{ repo_name }}' ~/.ssh/config"
+      register: config_check
+      failed_when: config_check.rc not in [0, 1]
+
+    - name: Ajouter la configuration SSH pour le dépôt si elle n'existe pas
+      ansible.builtin.lineinfile:
+        path: "~/.ssh/config"
+        line: |
+          Host {{ repo_name }}
+            HostName github.com
+            User git
+            IdentityFile {{ key_path }}{{ repo_name }}/id_rsa
+            IdentitiesOnly yes
+        create: yes
+        state: present
+      when: config_check.rc == 1
+
+    - name: Vérifier si une clé existe déjà sur GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/keys"
+        method: GET
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          X-GitHub-Api-Version: "2022-11-28"
+        status_code: 200
+        validate_certs: yes
+      register: github_keys
+
+    - name: Vérifier si la clé publique existe déjà dans les clés GitHub
+      ansible.builtin.set_fact:
+        key_exists: "{{ public_key_cleaned in github_keys.json | map(attribute='key') | list }}"
+
+    - name: Envoyer une requête API à GitHub pour ajouter une clé publique si n'existe pas
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/keys"
+        method: POST
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          X-GitHub-Api-Version: "2022-11-28"
+          Content-Type: "application/json"
+        body: |
+          {
+            "title": "{{ repo_name }}-key",
+            "key": "{{ public_key_cleaned }}",
+            "read_only": false
+          }
+        body_format: json
+        status_code: 201
+        validate_certs: yes
+      when: not key_exists
+
+    - name: Cloner le dépôt GitHub dans le répertoire de travail
+      ansible.builtin.git:
+        repo: "git@{{ repo_name }}:{{ owner }}/{{ repo_name }}.git"
+        dest: "{{ workspace }}/{{ repo_name }}"
+        version: "main"
+        accept_hostkey: yes
+      when: not key_exists
+
+    - name: Récupérer la clé publique de chiffrement de GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/public-key"
+        method: GET
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+        validate_certs: yes
+      register: github_public_key
+
+    - name: Copy the Python script to the remote host
+      copy:
+        src: encrypt.py
+        dest: /tmp/encrypt.py
+        mode: 0755
+
+    - name: Encrypter le secrets SSH_PRIVATE_KEY avec le script Python
+      ansible.builtin.command:
+        cmd: >
+          python3 /tmp/encrypt.py "{{ github_public_key.json.key }}" "{{ private_key_content.stdout }}"
+      register: encrypted_private_key
+      failed_when: encrypted_private_key.rc != 0
+
+    - name: Encrypter le secrets MAIN_BRANCH avec le script Python
+      ansible.builtin.command:
+        cmd: >
+          python3 /tmp/encrypt.py "{{ github_public_key.json.key }}" "{{ branch_name }}"
+      register: encrypted_branch_name
+      failed_when: encrypted_branch_name.rc != 0
+
+    - name: Encrypter le secrets WORK_DIR avec le script Python
+      ansible.builtin.command:
+        cmd: >
+          python3 /tmp/encrypt.py "{{ github_public_key.json.key }}" "{{ workspace }}/{{ repo_name }}"
+      register: encrypted_work_dir
+      failed_when: encrypted_work_dir.rc != 0
+
+    - name: Encrypter le secrets SSH_HOST avec le script Python
+      ansible.builtin.command:
+        cmd: >
+          python3 /tmp/encrypt.py "{{ github_public_key.json.key }}" "{{ ansible_host }}"
+      register: encrypted_ssh_host
+      failed_when: encrypted_ssh_host.rc != 0
+
+    - name: Encrypter le secrets SSH_USER avec le script Python
+      ansible.builtin.command:
+        cmd: >
+          python3 /tmp/encrypt.py "{{ github_public_key.json.key }}" "{{ ansible_user }}"
+      register: encrypted_ansible_user
+      failed_when: encrypted_ansible_user.rc != 0      
+
+    - name: Ajouter SSH_PRIVATE_KEY secrets au repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/SSH_PRIVATE_KEY"
+        method: PUT
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          Content-Type: "application/json"
+          X-GitHub-Api-Version: "2022-11-28"
+        body: |
+          {
+            "encrypted_value": "{{ encrypted_private_key.stdout.strip() }}",
+            "key_id": "{{ github_public_key.json.key_id }}"
+          }
+        status_code: 
+          - 201
+          - 204
+        body_format: json
+        validate_certs: yes
+
+    - name: Ajouter MAIN_BRANCH secrets au repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/MAIN_BRANCH"
+        method: PUT
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          Content-Type: "application/json"
+          X-GitHub-Api-Version: "2022-11-28"
+        body: |
+          {
+            "encrypted_value": "{{ encrypted_branch_name.stdout.strip() }}",
+            "key_id": "{{ github_public_key.json.key_id }}"
+          }
+        status_code: 
+          - 201
+          - 204
+        body_format: json
+        validate_certs: yes
+
+    - name: Ajouter WORK_DIR secrets au repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/WORK_DIR"
+        method: PUT
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          Content-Type: "application/json"
+          X-GitHub-Api-Version: "2022-11-28"
+        body: |
+          {
+            "encrypted_value": "{{ encrypted_work_dir.stdout.strip() }}",
+            "key_id": "{{ github_public_key.json.key_id }}"
+          }
+        status_code: 
+          - 201
+          - 204
+        body_format: json
+        validate_certs: yes
+
+    - name: Ajouter SSH_HOST secrets au repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/SSH_HOST"
+        method: PUT
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          Content-Type: "application/json"
+          X-GitHub-Api-Version: "2022-11-28"
+        body: |
+          {
+            "encrypted_value": "{{ encrypted_ssh_host.stdout.strip() }}",
+            "key_id": "{{ github_public_key.json.key_id }}"
+          }
+        status_code: 
+          - 201
+          - 204
+        body_format: json
+        validate_certs: yes
+
+    - name: Ajouter SSH_USER secrets au repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/SSH_USER"
+        method: PUT
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          Content-Type: "application/json"
+          X-GitHub-Api-Version: "2022-11-28"
+        body: |
+          {
+            "encrypted_value": "{{ encrypted_ansible_user.stdout.strip() }}",
+            "key_id": "{{ github_public_key.json.key_id }}"
+          }
+        status_code: 
+          - 201
+          - 204
+        body_format: json
+        validate_certs: yes
