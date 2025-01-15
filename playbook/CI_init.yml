@@ -137,13 +137,18 @@
         validate_certs: yes
       when: not key_exists
 
+    - name: Vérifier l'existence du répertoire {{ repo_name }}
+      ansible.builtin.stat:
+        path: "{{ workspace }}/{{ repo_name }}"
+      register: ssh_dir_repo_status
+
     - name: Cloner le dépôt GitHub dans le répertoire de travail
       ansible.builtin.git:
         repo: "git@{{ repo_name }}:{{ owner }}/{{ repo_name }}.git"
         dest: "{{ workspace }}/{{ repo_name }}"
         version: "main"
         accept_hostkey: yes
-      when: not key_exists
+      when: not ssh_dir_repo_status.stat.exists
 
     - name: Récupérer la clé publique de chiffrement de GitHub
       ansible.builtin.uri:
