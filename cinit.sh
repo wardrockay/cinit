@@ -34,80 +34,91 @@ general_config_file="/home/tolliam/starlightcoder/speenea/script/cinit.conf"
 custom_config_file="./cinit.conf"
 hosts_file="/home/tolliam/starlightcoder/speenea/script/hosts/hosts"
 
-# Vérifiez si le fichier de configuration générale existe
-if [ ! -f "$general_config_file" ]; then
-  echo "Fichier de configuration générale $general_config_file introuvable. Création en cours..."
+# Chargement ou création des fichiers de configuration
+github_secret_key=""
+workspace=""
+key_path=""
+dest_server=""
+dest_server_group_name=""
+
+if [ -f "$general_config_file" ]; then
+  source "$general_config_file"
+else
   github_secret_key=$(prompt_for_value "github_secret_key" "Entrez la clé secrète GitHub" "")
   echo "github_secret_key=$github_secret_key" > "$general_config_file"
-else
-  source "$general_config_file"
-
-  if [ -z "$github_secret_key" ]; then
-    github_secret_key=$(prompt_for_value "github_secret_key" "Entrez la clé secrète GitHub" "")
-    echo "github_secret_key=$github_secret_key" > "$general_config_file"
-  fi
 fi
 
-# Vérifiez si le fichier de configuration custom existe
-if [ ! -f "$custom_config_file" ]; then
-  echo "Fichier de configuration custom $custom_config_file introuvable. Création en cours..."
-  workspace=$(prompt_for_value "workspace" "Entrez le chemin du workspace" "/chemin/vers/workspace")
-  key_path=$(prompt_for_value "key_path" "Entrez le répertoire où enregistrer les clés générées" "")
-  dest_server=$(prompt_for_value "dest_server" "Entrez le serveur de déploiement" "")
-  dest_server_group_name=$(prompt_for_value "dest_server_group_name" "Entrez le groupe de serveurs (laisser vide pour 'default')" "default")
-
-  echo "workspace=$workspace" > "$custom_config_file"
-  echo "key_path=$key_path" >> "$custom_config_file"
-  echo "dest_server=$dest_server" >> "$custom_config_file"
-  echo "dest_server_group_name=$dest_server_group_name" >> "$custom_config_file"
-else
+if [ -f "$custom_config_file" ]; then
   source "$custom_config_file"
+fi
 
-  if [ -z "$workspace" ]; then
-    workspace=$(prompt_for_value "workspace" "Entrez le chemin du workspace" "/chemin/vers/workspace")
-    echo "workspace=$workspace" >> "$custom_config_file"
-  fi
+# Vérifiez et demandez les valeurs manquantes pour workspace et key_path
+if [ -z "$workspace" ]; then
+  workspace=$(prompt_for_value "workspace" "Entrez le chemin du workspace" "/chemin/vers/workspace")
+  echo "workspace='$workspace'" >> "$custom_config_file"
+fi
 
-  if [ -z "$key_path" ]; then
-    key_path=$(prompt_for_value "key_path" "Entrez le répertoire où enregistrer les clés générées" "")
-    echo "key_path=$key_path" >> "$custom_config_file"
-  fi
+if [ -z "$key_path" ]; then
+  key_path=$(prompt_for_value "key_path" "Entrez le répertoire où enregistrer les clés générées" "")
+  echo "key_path='$key_path'" >> "$custom_config_file"
+fi
 
-  if [ -z "$dest_server" ] && [ -z "$dest_server_group_name" ]; then
-    dest_server=$(prompt_for_value "dest_server" "Entrez le serveur de déploiement" "")
-    dest_server_group_name=$(prompt_for_value "dest_server_group_name" "Entrez le groupe de serveurs (laisser vide pour 'default')" "default")
-    echo "dest_server=$dest_server" >> "$custom_config_file"
-    echo "dest_server_group_name=$dest_server_group_name" >> "$custom_config_file"
-  fi
-
-  # Définit la destination finale
+# Fonction pour gérer le cas des serveurs et groupes
+configure_dest() {
   if [ -n "$dest_server" ]; then
-    dest="$dest_server"
+    if grep -q "$dest_server" "$hosts_file"; then
+      dest="$dest_server"
+    else
+      user=$(prompt_for_value "user" "Entrez le nom d'utilisateur Ansible" "")
+      password=$(prompt_for_value "password" "Entrez le mot de passe Ansible" "")
+      dest_server_group_name=$(prompt_for_value "dest_server_group_name" "Entrez le groupe de serveurs (laisser vide pour 'default')" "default")
+      
+      if [ "$dest_server_group_name" == "default" ]; then
+        echo "[default]" >> "$hosts_file"
+      else
+        echo "[$dest_server_group_name]" >> "$hosts_file"
+      fi
+      
+      echo "$dest_server ansible_user=$user ansible_password=$password" >> "$hosts_file"
+      dest="$dest_server"
+    fi
+  elif [ -n "$dest_server_group_name" ]; then
+    if grep -q "^\[$dest_server_group_name\]" "$hosts_file"; then
+      dest="$dest_server_group_name"
+    else
+      dest_server=$(prompt_for_value "dest_server" "Entrez le serveur de déploiement" "")
+      user=$(prompt_for_value "user" "Entrez le nom d'utilisateur Ansible" "")
+      password=$(prompt_for_value "password" "Entrez le mot de passe Ansible" "")
+      echo "[$dest_server_group_name]" >> "$hosts_file"
+      echo "$dest_server ansible_user=$user ansible_password=$password" >> "$hosts_file"
+      dest="$dest_server_group_name"
+    fi
   else
-    dest="$dest_server_group_name"
+    dest_server=$(prompt_for_value "dest_server" "Entrez le serveur de déploiement" "")
+    user=$(prompt_for_value "user" "Entrez le nom d'utilisateur Ansible" "")
+    password=$(prompt_for_value "password" "Entrez le mot de passe Ansible" "")
+    dest_server_group_name=$(prompt_for_value "dest_server_group_name" "Entrez le groupe de serveurs (laisser vide pour 'default')" "default")
+
+    if [ "$dest_server_group_name" == "default" ]; then
+      echo "[default]" >> "$hosts_file"
+    else
+      echo "[$dest_server_group_name]" >> "$hosts_file"
+    fi
+
+    echo "$dest_server ansible_user=$user ansible_password=$password" >> "$hosts_file"
+
+    read -p "Voulez-vous cibler le groupe ou le serveur individuel ? (groupe/serveur): " target_choice
+    if [ "$target_choice" == "groupe" ]; then
+      dest="$dest_server_group_name"
+      echo "dest_server_group_name=$dest_server_group_name" >> "$custom_config_file"
+    else
+      dest="$dest_server"
+      echo "dest_server=$dest_server" >> "$custom_config_file"
+    fi
   fi
-fi
+}
 
-# Vérifiez si le fichier hosts existe
-if [ ! -f "$hosts_file" ]; then
-  echo "Fichier hosts introuvable. Création en cours..."
-  touch "$hosts_file"
-fi
-
-# Vérifiez si la configuration pour dest_server ou dest_server_group_name existe
-if [ -n "$dest_server_group_name" ] && ! grep -q "^\[$dest_server_group_name\]" "$hosts_file"; then
-  echo "Configuration pour le groupe $dest_server_group_name introuvable. Création en cours..."
-  echo "" >> "$hosts_file"
-  echo "[$dest_server_group_name]" >> "$hosts_file"
-fi
-
-if [ -n "$dest_server" ] && ! grep -q "$dest_server" "$hosts_file"; then
-  echo "Configuration pour le serveur $dest_server introuvable. Création en cours..."
-  user=$(prompt_for_value "user" "Entrez le nom d'utilisateur Ansible" "")
-  password=$(prompt_for_value "password" "Entrez le mot de passe Ansible" "")
-
-  echo "$dest_server ansible_user=$user ansible_password=$password" >> "$hosts_file"
-fi
+configure_dest
 
 # Récupérer l'URL du dépôt distant
 remote_url=$(git config --get remote.origin.url)
