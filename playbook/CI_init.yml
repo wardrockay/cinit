@@ -10,7 +10,7 @@
       ansible.builtin.file:
         path: "{{ key_path }}"
         state: directory
-        mode: '0700'
+        mode: "0700"
       when: not ssh_dir_status.stat.exists
 
     - name: Vérifier l'existence du répertoire pour le dépôt spécifique
@@ -22,7 +22,7 @@
       ansible.builtin.file:
         path: "{{ key_path }}/{{ repo_name }}"
         state: directory
-        mode: '0700'
+        mode: "0700"
       when: not repo_dir_status.stat.exists
 
     - name: Vérifier l'existence du répertoire de travail défini dans [devserv:vars]
@@ -34,7 +34,7 @@
       ansible.builtin.file:
         path: "{{ workspace }}"
         state: directory
-        mode: '0755'
+        mode: "0755"
       when: not workspace_dir_status.stat.exists
 
     - name: Vérifier l'existence des clés SSH dans le répertoire du dépôt
@@ -52,9 +52,9 @@
     - name: Configurer les permissions pour la clé privée
       ansible.builtin.file:
         path: "{{ key_path }}/{{ repo_name }}/id_rsa"
-        mode: '0600'
+        mode: "0600"
       when: ssh_key_status.stat.exists
-    
+
     - name: Lire le contenu de la clé privée
       ansible.builtin.shell:
         cmd: "cat {{ key_path }}/{{ repo_name }}/id_rsa"
@@ -194,12 +194,26 @@
       register: encrypted_ssh_host
       failed_when: encrypted_ssh_host.rc != 0
 
+    - name: Encrypter le secrets DOCKER_USERNAME avec le script Python
+      ansible.builtin.command:
+        cmd: >
+          python3 /tmp/encrypt.py "{{ github_public_key.json.key }}" "{{ DOCKER_USERNAME }}"
+      register: encrypted_docker_username
+      failed_when: encrypted_docker_username.rc != 0
+
+    - name: Encrypter le secrets DOCKER_PASSWORD  avec le script Python
+      ansible.builtin.command:
+        cmd: >
+          python3 /tmp/encrypt.py "{{ github_public_key.json.key }}" "{{ DOCKER_PASSWORD }}"
+      register: encrypted_docker_password
+      failed_when: encrypted_docker_password.rc != 0
+
     - name: Encrypter le secrets SSH_USER avec le script Python
       ansible.builtin.command:
         cmd: >
           python3 /tmp/encrypt.py "{{ github_public_key.json.key }}" "{{ ansible_user }}"
       register: encrypted_ansible_user
-      failed_when: encrypted_ansible_user.rc != 0      
+      failed_when: encrypted_ansible_user.rc != 0
 
     - name: Ajouter SSH_PRIVATE_KEY secrets au repository GitHub
       ansible.builtin.uri:
@@ -215,7 +229,7 @@
             "encrypted_value": "{{ encrypted_private_key.stdout.strip() }}",
             "key_id": "{{ github_public_key.json.key_id }}"
           }
-        status_code: 
+        status_code:
           - 201
           - 204
         body_format: json
@@ -235,7 +249,7 @@
             "encrypted_value": "{{ encrypted_branch_name.stdout.strip() }}",
             "key_id": "{{ github_public_key.json.key_id }}"
           }
-        status_code: 
+        status_code:
           - 201
           - 204
         body_format: json
@@ -255,7 +269,7 @@
             "encrypted_value": "{{ encrypted_work_dir.stdout.strip() }}",
             "key_id": "{{ github_public_key.json.key_id }}"
           }
-        status_code: 
+        status_code:
           - 201
           - 204
         body_format: json
@@ -275,7 +289,7 @@
             "encrypted_value": "{{ encrypted_ssh_host.stdout.strip() }}",
             "key_id": "{{ github_public_key.json.key_id }}"
           }
-        status_code: 
+        status_code:
           - 201
           - 204
         body_format: json
@@ -295,7 +309,47 @@
             "encrypted_value": "{{ encrypted_ansible_user.stdout.strip() }}",
             "key_id": "{{ github_public_key.json.key_id }}"
           }
-        status_code: 
+        status_code:
+          - 201
+          - 204
+        body_format: json
+        validate_certs: yes
+
+    - name: Ajouter DOCKER_USERNAME secrets au repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/DOCKER_USERNAME"
+        method: PUT
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          Content-Type: "application/json"
+          X-GitHub-Api-Version: "2022-11-28"
+        body: |
+          {
+            "encrypted_value": "{{ encrypted_docker_username.stdout.strip() }}",
+            "key_id": "{{ github_public_key.json.key_id }}"
+          }
+        status_code:
+          - 201
+          - 204
+        body_format: json
+        validate_certs: yes
+
+    - name: Ajouter DOCKER_PASSWORD  secrets au repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/DOCKER_PASSWORD"
+        method: PUT
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          Content-Type: "application/json"
+          X-GitHub-Api-Version: "2022-11-28"
+        body: |
+          {
+            "encrypted_value": "{{ encrypted_docker_password.stdout.strip() }}",
+            "key_id": "{{ github_public_key.json.key_id }}"
+          }
+        status_code:
           - 201
           - 204
         body_format: json

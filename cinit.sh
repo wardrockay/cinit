@@ -10,7 +10,7 @@ prompt_for_value() {
   echo "${value:-$default_value}"
 }
 
-# Vérifiez si le script est exécuté dans un répertoire Git
+# Vérifiez si le init-deploy est exécuté dans un répertoire Git
 if [ ! -d ".git" ]; then
   echo "Ce répertoire n'est pas un dépôt Git."
   exit 1
@@ -30,9 +30,9 @@ if ! command -v ansible-playbook &> /dev/null; then
 fi
 
 # Fichiers de configuration
-general_config_file="/home/tolliam/starlightcoder/speenea/script/cinit.conf"
+general_config_file="/home/tolliam/starlightcoder/speenea/init-deploy/cinit.conf"
 custom_config_file="./cinit.conf"
-hosts_file="/home/tolliam/starlightcoder/speenea/script/hosts/hosts"
+hosts_file="/home/tolliam/starlightcoder/speenea/init-deploy/hosts/hosts"
 
 # Chargement ou création des fichiers de configuration
 github_secret_key=""
@@ -140,5 +140,5 @@ branch_name=$(git rev-parse --abbrev-ref HEAD)
 
 # Exécuter le playbook Ansible
 ansible-playbook -i "$hosts_file" \
-/home/tolliam/starlightcoder/speenea/script/playbook/CI_init.yml \
+/home/tolliam/starlightcoder/speenea/init-deploy/playbook/CI_init.yml \
 -e "repo_name=$repo_name branch_name=$branch_name owner=$owner workspace=$workspace key_path=$key_path dest=$dest github_secret_key=$github_secret_key"
