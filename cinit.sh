@@ -147,6 +147,7 @@ else
 fi
 
 # Récupérer le nom de la branche actuelle
+# branch_name=$(git rev-parse --abbrev-ref HEAD)
 branch_name="main"
 
 # Déterminer quel playbook exécuter en fonction de l'action
