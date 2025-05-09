@@ -1,5 +1,16 @@
 #!/bin/bash
 
+# Vérifier si un argument a été passé
+action="init"
+if [ $# -eq 1 ]; then
+  action="$1"
+  if [ "$action" != "init" ] && [ "$action" != "cleanup" ]; then
+    echo "Argument non valide. Utilisez 'init' ou 'cleanup'."
+    echo "Usage: ./cinit.sh [init|cleanup]"
+    exit 1
+  fi
+fi
+
 # Fonction pour demander une valeur 
 prompt_for_value() {
   local var_name="$1"
@@ -136,9 +147,18 @@ else
 fi
 
 # Récupérer le nom de la branche actuelle
-branch_name=$(git rev-parse --abbrev-ref HEAD)
+branch_name="main"
+
+# Déterminer quel playbook exécuter en fonction de l'action
+playbook_file="/home/tolliam/starlightcoder/speenea/init-deploy/playbook/CI_init.yml"
+if [ "$action" == "cleanup" ]; then
+  playbook_file="/home/tolliam/starlightcoder/speenea/init-deploy/playbook/CI_cleanup.yml"
+  echo "Exécution du playbook de nettoyage..."
+else
+  echo "Exécution du playbook d'initialisation..."
+fi
 
 # Exécuter le playbook Ansible
 ansible-playbook -i "$hosts_file" \
-/home/tolliam/starlightcoder/speenea/init-deploy/playbook/CI_init.yml \
+"$playbook_file" \
 -e "repo_name=$repo_name branch_name=$branch_name owner=$owner workspace=$workspace key_path=$key_path dest=$dest github_secret_key=$github_secret_key"

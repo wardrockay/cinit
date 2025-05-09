@@ -1,0 +1,168 @@
+- name: Cleanup repository and SSH keys
+  hosts: "{{ dest }}"
+  tasks:
+    - name: Récupérer la liste des secrets GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets"
+        method: GET
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          X-GitHub-Api-Version: "2022-11-28"
+        status_code: 200
+        validate_certs: yes
+      register: github_secrets
+      
+    - name: Supprimer le secret SSH_PRIVATE_KEY du repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/SSH_PRIVATE_KEY"
+        method: DELETE
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          X-GitHub-Api-Version: "2022-11-28"
+        status_code: 204
+        validate_certs: yes
+      when: "'SSH_PRIVATE_KEY' in github_secrets.json.secrets | map(attribute='name') | list"
+      
+    - name: Supprimer le secret MAIN_BRANCH du repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/MAIN_BRANCH"
+        method: DELETE
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          X-GitHub-Api-Version: "2022-11-28"
+        status_code: 204
+        validate_certs: yes
+      when: "'MAIN_BRANCH' in github_secrets.json.secrets | map(attribute='name') | list"
+      
+    - name: Supprimer le secret WORK_DIR du repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/WORK_DIR"
+        method: DELETE
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          X-GitHub-Api-Version: "2022-11-28"
+        status_code: 204
+        validate_certs: yes
+      when: "'WORK_DIR' in github_secrets.json.secrets | map(attribute='name') | list"
+      
+    - name: Supprimer le secret SSH_HOST du repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/SSH_HOST"
+        method: DELETE
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          X-GitHub-Api-Version: "2022-11-28"
+        status_code: 204
+        validate_certs: yes
+      when: "'SSH_HOST' in github_secrets.json.secrets | map(attribute='name') | list"
+      
+    - name: Supprimer le secret SSH_USER du repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/SSH_USER"
+        method: DELETE
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          X-GitHub-Api-Version: "2022-11-28"
+        status_code: 204
+        validate_certs: yes
+      when: "'SSH_USER' in github_secrets.json.secrets | map(attribute='name') | list"
+      
+    - name: Récupérer la liste des clés de déploiement GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/keys"
+        method: GET
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          X-GitHub-Api-Version: "2022-11-28"
+        status_code: 200
+        validate_certs: yes
+      register: github_keys
+      
+    - name: Lire le contenu de la clé publique
+      ansible.builtin.shell:
+        cmd: "cat {{ key_path }}/{{ repo_name }}/id_rsa.pub"
+      register: public_key_content
+      failed_when: false
+      
+    - name: Nettoyer le contenu de la clé publique pour éviter les espaces inutiles
+      ansible.builtin.set_fact:
+        public_key_cleaned: "{{ public_key_content.stdout.strip() }}"
+      when: public_key_content.rc == 0
+      
+    - name: Trouver l'ID de la clé de déploiement à supprimer
+      ansible.builtin.set_fact:
+        key_id_to_delete: "{{ item.id }}"
+      loop: "{{ github_keys.json }}"
+      when: 
+        - public_key_content.rc == 0
+        - item.key == public_key_cleaned
+      
+    - name: Supprimer la clé de déploiement du repository GitHub
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/keys/{{ key_id_to_delete }}"
+        method: DELETE
+        headers:
+          Accept: "application/vnd.github+json"
+          Authorization: "Bearer {{ github_secret_key }}"
+          X-GitHub-Api-Version: "2022-11-28"
+        status_code: 204
+        validate_certs: yes
+      when: key_id_to_delete is defined
+      
+    - name: Supprimer la configuration SSH pour le dépôt
+      ansible.builtin.lineinfile:
+        path: "~/.ssh/config"
+        regexp: "^Host {{ repo_name }}$"
+        state: absent
+      
+    - name: Supprimer les lignes suivantes de la configuration SSH
+      ansible.builtin.lineinfile:
+        path: "~/.ssh/config"
+        regexp: "{{ item }}"
+        state: absent
+      loop:
+        - "^\\s+HostName github.com$"
+        - "^\\s+User git$"
+        - "^\\s+IdentityFile {{ key_path }}{{ repo_name }}/id_rsa$"
+        - "^\\s+IdentitiesOnly yes$"
+      
+    - name: Supprimer la clé publique du fichier authorized_keys
+      ansible.builtin.authorized_key:
+        user: "{{ ansible_user }}"
+        key: "{{ public_key_cleaned }}"
+        state: absent
+      when: public_key_content.rc == 0
+      
+    - name: Vérifier l'existence du répertoire du dépôt cloné
+      ansible.builtin.stat:
+        path: "{{ workspace }}/{{ repo_name }}"
+      register: repo_dir_status
+      
+    - name: Supprimer le répertoire du dépôt cloné s'il existe
+      ansible.builtin.file:
+        path: "{{ workspace }}/{{ repo_name }}"
+        state: absent
+      when: repo_dir_status.stat.exists
+      
+    - name: Vérifier l'existence du répertoire des clés SSH pour le dépôt
+      ansible.builtin.stat:
+        path: "{{ key_path }}/{{ repo_name }}"
+      register: ssh_key_dir_status
+      
+    - name: Supprimer le répertoire des clés SSH pour le dépôt s'il existe
+      ansible.builtin.file:
+        path: "{{ key_path }}/{{ repo_name }}"
+        state: absent
+      when: ssh_key_dir_status.stat.exists
+      
+    - name: Supprimer le script Python temporaire
+      ansible.builtin.file:
+        path: /tmp/encrypt.py
+        state: absent

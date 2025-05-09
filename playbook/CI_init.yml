@@ -187,23 +187,23 @@
       register: encrypted_work_dir
       failed_when: encrypted_work_dir.rc != 0
 
-    - name: Encrypter le secrets SSH_HOST avec le script Python
+    - name: Encrypter le secrets DEPLOY_HOST avec le script Python
       ansible.builtin.command:
         cmd: >
           python3 /tmp/encrypt.py "{{ github_public_key.json.key }}" "{{ ansible_host }}"
       register: encrypted_ssh_host
       failed_when: encrypted_ssh_host.rc != 0
 
-    - name: Encrypter le secrets SSH_USER avec le script Python
+    - name: Encrypter le secrets DEPLOY_USER avec le script Python
       ansible.builtin.command:
         cmd: >
           python3 /tmp/encrypt.py "{{ github_public_key.json.key }}" "{{ ansible_user }}"
       register: encrypted_ansible_user
       failed_when: encrypted_ansible_user.rc != 0
 
-    - name: Ajouter SSH_PRIVATE_KEY secrets au repository GitHub
+    - name: Ajouter DEPLOY_PRIVATE_KEY secrets au repository GitHub
       ansible.builtin.uri:
-        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/SSH_PRIVATE_KEY"
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/DEPLOY_PRIVATE_KEY"
         method: PUT
         headers:
           Accept: "application/vnd.github+json"
@@ -221,9 +221,9 @@
         body_format: json
         validate_certs: yes
 
-    - name: Ajouter MAIN_BRANCH secrets au repository GitHub
+    - name: Ajouter DEPLOY_MAIN_BRANCH secrets au repository GitHub
       ansible.builtin.uri:
-        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/MAIN_BRANCH"
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/DEPLOY_MAIN_BRANCH"
         method: PUT
         headers:
           Accept: "application/vnd.github+json"
@@ -241,9 +241,9 @@
         body_format: json
         validate_certs: yes
 
-    - name: Ajouter WORK_DIR secrets au repository GitHub
+    - name: Ajouter DEPLOY_WORK_DIR secrets au repository GitHub
       ansible.builtin.uri:
-        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/WORK_DIR"
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/DEPLOY_WORK_DIR"
         method: PUT
         headers:
           Accept: "application/vnd.github+json"
@@ -261,9 +261,9 @@
         body_format: json
         validate_certs: yes
 
-    - name: Ajouter SSH_HOST secrets au repository GitHub
+    - name: Ajouter DEPLOY_HOST secrets au repository GitHub
       ansible.builtin.uri:
-        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/SSH_HOST"
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/DEPLOY_HOST"
         method: PUT
         headers:
           Accept: "application/vnd.github+json"
@@ -281,9 +281,9 @@
         body_format: json
         validate_certs: yes
 
-    - name: Ajouter SSH_USER secrets au repository GitHub
+    - name: Ajouter DEPLOY_USER secrets au repository GitHub
       ansible.builtin.uri:
-        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/SSH_USER"
+        url: "https://api.github.com/repos/{{ owner }}/{{ repo_name }}/actions/secrets/DEPLOY_USER"
         method: PUT
         headers:
           Accept: "application/vnd.github+json"
