@@ -51,6 +51,7 @@ workspace=""
 key_path=""
 dest_server=""
 dest_server_group_name=""
+BRANCH_NAME="main" # Default branch name is 'main'
 
 if [ -f "$general_config_file" ]; then
   source "$general_config_file"
@@ -146,9 +147,8 @@ else
   exit 1
 fi
 
-# Récupérer le nom de la branche actuelle
-# branch_name=$(git rev-parse --abbrev-ref HEAD)
-branch_name="main"
+# Utiliser BRANCH_NAME défini plus haut (peut être modifié dans le fichier de configuration)
+branch_name="$BRANCH_NAME"
 
 # Déterminer quel playbook exécuter en fonction de l'action
 playbook_file="/home/tolliam/starlightcoder/speenea/init-deploy/playbook/CI_init.yml"
